@@ -1,0 +1,74 @@
+name: build-and-deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/<owner>/<repo>
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install deps
+        run: bun install --frozen-lockfile
+      # 부팅 시 Notion 에 접속(ensureDatabaseProperties)하므로 HTTP 스모크 대신
+      # 번들 컴파일로 임포트/문법을 검증한다(시크릿 불필요).
+      - name: Build check (bundle compiles)
+        run: |
+          bun build src/index.ts --target=bun --outfile /tmp/bundle.js
+          echo "✅ bundle OK"
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase image name
+        id: img
+        run: echo "name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}:latest
+            ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Redeploy via deploy-proxy
+        env:
+          PROXY_URL: ${{ secrets.DEPLOY_PROXY_URL }}       # https://<무작위>.oein.fyi
+          PROXY_TOKEN: ${{ secrets.DEPLOY_PROXY_TOKEN }}
+        run: |
+          if [ -n "$PROXY_URL" ] && [ -n "$PROXY_TOKEN" ]; then
+            echo "Redeploying 'saki' via deploy-proxy..."
+            curl -fsSL -X POST "$PROXY_URL/deploy/saki" \
+              -H "Authorization: Bearer $PROXY_TOKEN"
+          else
+            echo "DEPLOY_PROXY_URL/TOKEN secret 미설정 — 재배포 스킵."
+          fi

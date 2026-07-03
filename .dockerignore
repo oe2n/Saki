@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+dist
+.env
+*.env
+!.env.example
+.DS_Store
+README.md
+CLAUDE.md
+install.sh
+log.log
