@@ -85,10 +85,13 @@ function parseDigestHeader(header: string): Record<string, string> {
 
 function sendAuthChallenge(res: express.Response): void {
   const nonce = generateNonce();
-  res.set(
-    "WWW-Authenticate",
-    `Digest realm="${REALM}", nonce="${nonce}", qop="auth", algorithm=MD5`
-  );
+  // Advertise Basic first (preferred): behind Traefik the client<->server hop is
+  // HTTPS, so Basic is safe and far more interoperable than Digest with Apple
+  // Calendar. Digest is kept as a fallback for plain-HTTP direct access.
+  res.set("WWW-Authenticate", [
+    `Basic realm="${REALM}"`,
+    `Digest realm="${REALM}", nonce="${nonce}", qop="auth", algorithm=MD5`,
+  ]);
   res.set("DAV", DAV_HEADER);
   res.status(401).send("Authentication required");
 }
